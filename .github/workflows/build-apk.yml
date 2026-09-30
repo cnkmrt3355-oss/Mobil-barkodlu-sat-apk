@@ -20,6 +20,13 @@ jobs:
       - run: npm install
       - run: npm run build
       - run: npx cap add android
+      - name: Kamera izni ve tarayıcı modülü
+        run: |
+          sed -i 's/minSdkVersion = .*/minSdkVersion = 23/' android/variables.gradle
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#</application>#<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/></application>#' $M
+          sed -i 's#</manifest>#<uses-permission android:name="android.permission.CAMERA" /></manifest>#' $M
+          cat $M
       - run: npx cap sync android
       - name: Debug APK derle
         working-directory: android
@@ -28,4 +35,3 @@ jobs:
         with:
           name: barkod-pos-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          
