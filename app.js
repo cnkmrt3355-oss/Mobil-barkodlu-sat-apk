@@ -66,16 +66,22 @@ const views = {
     <button class="btn ghost" data-act="go" data-v="products">Geri</button>`;
   },
   async import() {
-    return `<h1>Ürün İçe Aktar</h1><p class="muted">Her satır: barkod,ad,alış,satış,stok,min,birim,kategori (virgül veya TAB ile ayrılmış; birim/kategori isteğe bağlı). Barkod zaten kayıtlıysa ürün güncellenir.</p>
-    <textarea id="imp" placeholder="869000000004,Ayran,8,12,20,5,adet,İçecek"></textarea>
+    return `<h1>Ürün İçe/Dışa Aktar</h1>
+    <h2>İçe Aktar</h2><p class="muted">Her satır: <b>Ürün Adı;Barkod;Fiyat;Stok</b> (taranan ürün listenizle aynı biçim). '#' ile başlayan satırlar yorum sayılır, atlanır. Barkod zaten kayıtlıysa ürün güncellenir.</p>
+    <label for="impfile">.txt / .csv dosyasından yükle</label><input type="file" id="impfile" accept=".txt,.csv,text/plain,text/csv">
+    <textarea id="imp" placeholder="Kızılay Elmalı maden suyu;8692813005611;20;0"></textarea>
     <button class="btn big" data-act="doimport">İçe Aktar</button>
+    <h2>Dışa Aktar</h2><p class="muted">Tüm ürünleri aynı biçimde dosya olarak paylaşır (yedek almak veya başka bir cihaza taşımak için).</p>
+    <div class="row"><button class="btn ghost" data-act="exporttxt">📤 TXT indir</button><button class="btn ghost" data-act="exportcsv">📤 CSV indir</button></div>
     <button class="btn ghost" data-act="go" data-v="products">Geri</button>`;
   },
   async 'product-form'() {
     const p = arg?.id ? await P.byId(arg.id) : null, cats = await P.categories();
     const v = p || { barcode: arg?.barcode || '', name: '', purchase_price: 0, sale_price: 0, stock: 0, minimum_stock: 5, unit: 'adet', category_id: 2 };
     const f = (id, l, val, extra = '') => `<label for="${id}">${l}</label><input id="${id}" value="${esc(val)}" ${extra}>`;
-    return `<h1>${p ? 'Ürünü düzenle' : 'Yeni ürün'}</h1>${f('f-barcode', 'Barkod', v.barcode, 'inputmode="numeric"')}${f('f-name', 'Ürün adı', v.name)}
+    return `<h1>${p ? 'Ürünü düzenle' : 'Yeni ürün'}</h1>
+    <label for="f-barcode">Barkod</label><div class="row"><input id="f-barcode" value="${esc(v.barcode)}" inputmode="numeric"><button class="btn ghost" data-act="camscanform">📷</button></div>
+    ${f('f-name', 'Ürün adı', v.name)}
     <label for="f-cat">Kategori</label><select id="f-cat">${cats.map((c) => `<option value="${c.id}" ${c.id === v.category_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
     ${f('f-purchase', 'Alış fiyatı (₺)', kuruşToInput(v.purchase_price), 'inputmode="decimal"')}${f('f-sale', 'Satış fiyatı (₺)', kuruşToInput(v.sale_price), 'inputmode="decimal"')}
     ${f('f-stock', p ? 'Stok (Stok ekranından değişir)' : 'Stok', v.stock, `inputmode="numeric" ${p ? 'disabled' : ''}`)}${f('f-min', 'Minimum stok', v.minimum_stock, 'inputmode="numeric"')}${f('f-unit', 'Birim', v.unit)}
@@ -282,6 +288,12 @@ const act = {
     if (r.errors.length) alert(r.errors.slice(0, 15).join('\n'));
     if (r.ok) go('products');
   },
+  exporttxt: () => exportProducts('txt'),
+  exportcsv: () => exportProducts('csv'),
+  camscanform: async () => {
+    const c = await scanBarcode();
+    if (c) $('#f-barcode').value = c;
+  },
   theme: async () => {
     const cur = await Theme.get();
     const next = cur === 'system' ? 'light' : cur === 'light' ? 'dark' : 'system';
@@ -292,6 +304,14 @@ const act = {
     await S.voidSale(num(d)); toast('Satış iptal edildi'); render();
   },
 };
+async function exportProducts(fmt) {
+  const P2 = window.Capacitor?.Plugins;
+  if (!P2?.Filesystem || !P2?.Share) return toast('Dosya/paylaşım eklentisi bulunamadı', true);
+  const text = await P.exportText(fmt === 'csv');
+  const name = `urunler-${new Date().toISOString().slice(0, 10)}.${fmt}`;
+  const { uri } = await P2.Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+  await P2.Share.share({ title: name, url: uri });
+}
 async function doRestore(f) {
   if (!f) return;
   const text = await f.text();
@@ -309,7 +329,12 @@ async function addCode(c) {
 const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
 document.addEventListener('click', guard((e) => { const t = e.target.closest('[data-act]'); if (t) return act[t.dataset.act]?.(t.dataset); }));
 document.addEventListener('keydown', guard((e) => { if (e.key === 'Enter' && e.target.id === 'bc') return addCode(e.target.value); }));
-document.addEventListener('change', guard((e) => {
+document.addEventListener('change', guard(async (e) => {
+  if (e.target.id === 'impfile') {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) $('#imp').value = await f.text();
+    return;
+  }
   if (e.target.id === 'pay') { S.state.pay = e.target.value; return render(); }
   if (e.target.id === 'cust') { S.state.customerId = e.target.value ? Number(e.target.value) : null; return; }
   if (e.target.id === 'rcv') {

@@ -56,15 +56,24 @@ export async function bulkVat(categoryId, vat) {
   await tx([[`UPDATE products SET vat_rate=?,updated_at=${NOW}${categoryId ? ' WHERE category_id=?' : ''}`, categoryId ? [vat, categoryId] : [vat]]]);
 }
 
-// Her satır: barkod,ad,alış,satış,stok,min,birim,kategori (virgül veya TAB ile ayrılmış). Barkod varsa ürün güncellenir.
+// Yeni/ana format: her satır "Ürün Adı;Barkod;Fiyat;Stok" (taranan ürün listeleriyle aynı biçim). '#' ile başlayan satırlar yorum, atlanır.
+// Eski format (geriye uyumluluk): barkod,ad,alış,satış,stok,min,birim,kategori (virgül veya TAB ile ayrılmış).
 export async function importText(text) {
-  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   if (!lines.length) throw new Error('İçe aktarılacak satır yok');
   const set = [], errors = [], seen = new Set();
   let ok = 0;
   lines.forEach((line, idx) => {
     const row = idx + 1;
-    const [barcode, name, buyRaw, saleRaw, stockRaw, minRaw, unit, catName] = line.split(/\t|,/).map((s) => (s || '').trim());
+    const semi = line.split(';').map((s) => s.trim());
+    let barcode, name, buyRaw, saleRaw, stockRaw, minRaw, unit, catName;
+    if (semi.length >= 4 && /^\d{6,14}$/.test(semi[1])) {
+      // Ad;Barkod;Fiyat;Stok
+      [name, barcode, saleRaw, stockRaw] = semi;
+      buyRaw = '0'; minRaw = '5'; unit = 'adet'; catName = '';
+    } else {
+      [barcode, name, buyRaw, saleRaw, stockRaw, minRaw, unit, catName] = line.split(/\t|,/).map((s) => (s || '').trim());
+    }
     if (!barcode || !/^\d+$/.test(barcode)) return errors.push(`Satır ${row}: barkod geçersiz`);
     if (!name) return errors.push(`Satır ${row}: ürün adı boş`);
     if (seen.has(barcode)) return errors.push(`Satır ${row}: barkod dosyada tekrar ediyor (${barcode})`);
@@ -85,3 +94,14 @@ export async function importText(text) {
   if (set.length) await tx(set);
   return { ok, errors };
 }
+
+// Tüm ürünleri "Ad;Barkod;Fiyat;Stok" biçiminde metne döker (csv=true ise virgülle ayrılır ve başlık satırı eklenir).
+export async function exportText(csv = false) {
+  const rows = await q('SELECT name,barcode,sale_price,stock FROM products ORDER BY name');
+  const sep = csv ? ',' : ';';
+  const field = (s) => (csv && /[",\n]/.test(String(s)) ? `"${String(s).replace(/"/g, '""')}"` : s);
+  const lines = rows.map((r) => [field(r.name), r.barcode, (r.sale_price / 100).toFixed(2), r.stock].join(sep));
+  const header = csv ? ['Ürün Adı', 'Barkod', 'Fiyat', 'Stok'].join(sep) : '# Format: Urun Adi;Barkod;Fiyat;Stok';
+  return [header, ...lines].join('\n');
+}
+
