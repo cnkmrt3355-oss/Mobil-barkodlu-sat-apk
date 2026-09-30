@@ -15,3 +15,10 @@ export async function adjust(id, delta, reason = 'Manuel düzenleme') {
     [`INSERT INTO stock_movements(product_id,type,quantity,previous_stock,new_stock,reason,created_at) VALUES(?,?,?,?,?,?,${NOW})`, [id, delta > 0 ? 'giris' : 'cikis', Math.abs(delta), p.stock, n, reason]],
   ]);
 }
+
+export const movements = () => q('SELECT m.*,p.name FROM stock_movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 100');
+
+// Son kullanma tarihi verilenler arasında, belirtilen gün içinde (varsayılan 30) sona erecekler (geçmiş olanlar dahil).
+export const expiring = (days = 30) => q(`SELECT * FROM products WHERE expiry IS NOT NULL AND expiry<>'' AND date(expiry)<=date('now','localtime','+${Number(days)} days') ORDER BY expiry ASC LIMIT 100`);
+export const isExpiringSoon = (p) => p.expiry && new Date(p.expiry) <= new Date(Date.now() + 30 * 86400000);
+export const isExpired = (p) => p.expiry && new Date(p.expiry) < new Date(new Date().toDateString());

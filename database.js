@@ -19,8 +19,16 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS stock_movements(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER NOT NULL,type TEXT,quantity INTEGER,
     previous_stock INTEGER,new_stock INTEGER,reason TEXT,created_at TEXT)`,
   'CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)',
+  `CREATE TABLE IF NOT EXISTS held_sales(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT,cart_json TEXT NOT NULL,discount INTEGER NOT NULL DEFAULT 0,
+    payment_type TEXT,customer_id INTEGER,created_at TEXT)`,
+  'CREATE TABLE IF NOT EXISTS customers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT,created_at TEXT)',
+  `CREATE TABLE IF NOT EXISTS credit_transactions(id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,type TEXT NOT NULL,
+    description TEXT,amount INTEGER NOT NULL,created_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS cash_ledger(id INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT NOT NULL,amount INTEGER NOT NULL,description TEXT,
+    sale_id INTEGER,created_at TEXT)`,
   'CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)',
   'CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_credit_customer ON credit_transactions(customer_id)',
 ];
 
 export async function q(statement, values = []) {
@@ -36,7 +44,23 @@ export async function init() {
   try { await p.createConnection({ database: DB, version: 1, encrypted: false, mode: 'no-encryption', readonly: false }); } catch (e) { /* bağlantı zaten var */ }
   await p.open({ database: DB, readonly: false });
   await p.execute({ database: DB, transaction: true, statements: SCHEMA.join(';\n') });
+  await migrate();
   if (!(await q("SELECT 1 FROM settings WHERE key='seeded'")).length) await seed();
+}
+
+// Mevcut kurulumlarda eksik olan sütunları güvenli şekilde ekler (veri kaybı olmadan).
+const MIGRATIONS = {
+  sales: [['customer_id', 'INTEGER'], ['status', "TEXT NOT NULL DEFAULT 'tamam'"]],
+  products: [['expiry', 'TEXT'], ['fast', 'INTEGER NOT NULL DEFAULT 0'], ['vat_rate', 'INTEGER NOT NULL DEFAULT 20']],
+  credit_transactions: [['sale_id', 'INTEGER']],
+};
+async function migrate() {
+  for (const table in MIGRATIONS) {
+    const cols = (await q(`PRAGMA table_info(${table})`)).map((c) => c.name);
+    for (const [name, def] of MIGRATIONS[table]) {
+      if (!cols.includes(name)) await plugin().execute({ database: DB, statements: `ALTER TABLE ${table} ADD COLUMN ${name} ${def}` });
+    }
+  }
 }
 
 async function seed() {
